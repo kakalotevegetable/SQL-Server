@@ -1,0 +1,65 @@
+echo "# SQL-Server" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git remote add origin https://github.com/kakalotevegetable/SQL-Server.git
+git push -u origin master
+                
+Create PROCEDURE [dbo].[BOM_CRM_Price_DirectSale] ---直销
+@Cus_No varchar(10)     , --客户编码
+@BOM_Model varchar(32)  ,  --大洋型号
+@SAP_MAT_NO varchar(32) ,  --物料编号
+@Tax_Choice varchar(32)    --价格取值
+AS
+ --客户代码:" + customerCode);logger.info("==>>生产工厂:" + factory);logger.info("==>>大洋型号:" + model);logger.info("==>>物料编号:" + material
+BEGIN
+
+declare @Sale_Way varchar(1000)   --直销或分销
+declare @UrlAddress varchar(100)  --URL
+declare @ServiceUrl varchar(1000) --
+
+--set @Pro_Fact=case When @Pro_Fact='中山' Then 'CN' When @Pro_Fact='越南' Then 'VN' End
+set @UrlAddress = 'http://172.20.200.123:8080/com.dayang.web8442-1.0/findTariffPrice?' ---直销customerCode    sales   material
+set @ServiceUrl = @UrlAddress +'customerCode='+@Cus_No+'&model='+@BOM_Model+'&material='+@SAP_MAT_NO+'&aa='+cast(newId() as varchar(50)) 
+           
+Declare @Object as Int
+Declare  @responseText varchar(1000)
+
+Exec sp_OACreate 'MSXML2.XMLHTTP', @Object OUT;
+Exec sp_OAMethod @Object, 'open', NULL, 'get',@ServiceUrl,'false'
+Exec sp_OAMethod @Object, 'send'
+Exec sp_OAMethod @Object, 'responseText', @responseText OUTPUT
+
+declare @pos int
+select @responseText=REPLACE(@responseText,'[','')  --去“[”
+select @responseText=REPLACE(@responseText,']','')  --去“]”
+
+declare @Json_Table Table(Json_Str varchar(1000))   --声明表值变量
+set @pos=charindex('},',@responseText)              --定位“},”，拆分Json字符串
+
+IF @pos>0                                           --@pos>0,说明返回多个会，循环语句拆分后放在表变量中
+  Begin
+    Insert Into @Json_Table(Json_Str)
+    select Left(@responseText,@pos)
+	set @responseText=Right(@responseText,len(@responseText)-@pos-1)
+
+	set @pos=charindex('},','@responseText')
+  End
+
+ IF @pos=0                                          --只有一个Json或最后一个Json放在表变量中
+  Begin
+   Insert Into @Json_Table(Json_Str)
+     select @responseText
+	  
+  End
+  --四种价格
+select @Tax_Choice=Case When @Tax_Choice ='中山' Then 'zsPrice'
+						When @Tax_Choice ='越南' Then 'ynPrice'
+						When @Tax_Choice like '%10%' Then 'TariffPer10'
+						When @Tax_Choice Like '%25%' Then 'TariffPer20'  
+				   End
+  --价格存在，就变为decimal(18,2),否则设为0.00
+select IIF(dbo.fn_parsejson(Json_Str,@Tax_Choice)>'',cast(dbo.fn_parsejson(Json_Str,@Tax_Choice)as decimal(18,2)),0.00) From @Json_Table
+
+Exec sp_OADestroy @Object
+END
